@@ -110,6 +110,7 @@ rm "${QEMU_BIND_PATH}"
 B_ROOT_PARTUUID="$(eval "$(blkid "${LOOP_DEV_B_ROOT}" | sed -e '1s/^.*:\s*//' -e 's/\s+/;/g')"; echo $PARTUUID)"
 
 awk '$1=="PARTUUID='"${B_ROOT_PARTUUID}"'"{print $1, "f2fs", "defaults,noatime,background_gc=on,discard", 0, 0; next} {print;}' "${B_ROOT_MOUNT_PATH}/etc/fstab" > "${B_ROOT_MOUNT_PATH}/etc/fstab"
+sed -i -e 's/\(rootfstype=\)[^[:space:]]\+/\1f2fs/g' "${B_BOOT_MOUNT_PATH}/cmdline.txt"
 
 umount "${LOOP_DEV_B_BOOT}"
 umount "${LOOP_DEV_B_ROOT}"
