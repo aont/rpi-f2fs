@@ -29,8 +29,8 @@ $ sudo rsync -AXav /media/aoki/rootfs/ /media/aoki/rootfs1/
 
 $ file /usr/bin/qemu-aarch64-static
 
-$ sudo mkdir /media/aoki/rootfs1/host
-$ sudo mount --rbind /usr/bin /media/aoki/rootfs1/host
+$ sudo touch /media/aoki/rootfs1/tmp/qemu-aarch64-static
+$ sudo mount --bind /usr/bin/qemu-aarch64-static /media/aoki/rootfs1/host/qemu-aarch64-static
 
 $ cd /media/aoki/rootfs1/
 $ sudo mount --bind /dev ./dev
