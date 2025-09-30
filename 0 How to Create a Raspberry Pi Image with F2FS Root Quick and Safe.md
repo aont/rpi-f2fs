@@ -105,6 +105,9 @@ sudo rsync -aHAXx --numeric-ids --delete --info=progress2 /media/${USER}/rootfs/
 For package installs or config changes, bind mount essentials:
 
 ```bash
+udisksctl mount -b /dev/loop18p1   # -> /media/${USER}/bootfs1
+sudo mount --bind /media/${USER}/bootfs1 /media/${USER}/rootfs1/boot
+sudo touch /media/${USER}/rootfs1/qemu-aarch64-static
 sudo mount --bind /usr/bin/qemu-aarch64-static /media/${USER}/rootfs1/qemu-aarch64-static
 sudo mount --bind /dev  /media/${USER}/rootfs1/dev
 sudo mount --bind /proc /media/${USER}/rootfs1/proc
@@ -133,6 +136,7 @@ Unmount: /dev, etc.
 sudo umount /media/${USER}/rootfs1/etc/resolv.conf
 sudo umount /media/${USER}/rootfs1/{dev/pts,dev,proc,sys}
 sudo umount /media/${USER}/rootfs1/qemu-aarch64-static
+sudo rm /media/${USER}/rootfs1/qemu-aarch64-static
 ```
 
 ## 8. Update fstab and cmdline.txt
