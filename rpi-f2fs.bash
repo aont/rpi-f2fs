@@ -85,7 +85,7 @@ if [[ -d "${MOUNT_PATH}" ]]; then rm -rf "${MOUNT_PATH}"; fi
 QEMU_PATH="$(command -v "${QEMU}")"
 
 # Check for required packages; install any missing
-pkgs=(partclone f2fs-tools qemu-user-static util-linux rsync udisks2 coreutils grep)
+pkgs=(partclone f2fs-tools qemu-user-static util-linux rsync coreutils grep)
 missing=()
 for pkg in "${pkgs[@]}"; do
     if ! dpkg -s "$pkg" >/dev/null 2>&1; then
