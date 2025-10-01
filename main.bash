@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# sudo unshare --mount --fork /bin/bash
-# mount --make-rprivate /
-
 set -xe
 export LANG=C
 
