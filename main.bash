@@ -39,6 +39,8 @@ losetup_d_loop() {
             if [[ -z "$loop_dev" ]]; then
                 break
             else
+                umount "${loop_dev}p1" || true
+                umount "${loop_dev}p2" || true
                 losetup -d "$loop_dev"
             fi
         done
@@ -151,11 +153,15 @@ for item in /dev /dev/pts /proc /sys; do
     mount --bind "${item}" "${B_ROOT_MOUNT_PATH}${item}"
 done
 
-cat /proc/mounts
+set +x
+echo ---- begin /proc/mounts ---- 1>&2
+cat /proc/mounts 1>&2
+echo ---- end /proc/mounts ---- 1>&2
+set -x
 
 unshare --uts --fork chroot "${B_ROOT_MOUNT_PATH}" "${QEMU_PATH_CHROOT}" /bin/bash << EOS
 set -xe
-hostname "\$(cat /etc/hostname)"
+hostname "\$(< /etc/hostname)"
 apt-get update
 apt-get install f2fs-tools
 apt-get clean
@@ -172,31 +178,49 @@ rm "${QEMU_BIND_PATH}"
 
 B_ROOT_PARTUUID="$(eval "$(blkid "${LOOP_DEV_B_ROOT}" | sed -e '1s/^.*:\s*//' -e 's/\s+/;/g')"; echo $PARTUUID)"
 
+set +x
 echo ---- begin fstab before ---- 1>&2
 cat "${B_ROOT_MOUNT_PATH}/etc/fstab" 1>&2
 echo ---- end fstab before ---- 1>&2
+set -x
 
-awk '$1=="PARTUUID='"${B_ROOT_PARTUUID}"'"{print $1, "f2fs", "defaults,noatime,background_gc=on,discard", 0, 0; next} {print;}' "${B_ROOT_MOUNT_PATH}/etc/fstab" > "${B_ROOT_MOUNT_PATH}/etc/fstab"
+awk '$1=="PARTUUID='"${B_ROOT_PARTUUID}"'"{print $1, "f2fs", "defaults,noatime,background_gc=on,discard", 0, 0; next} {print;}' "${B_ROOT_MOUNT_PATH}/etc/fstab" > "${B_ROOT_MOUNT_PATH}/etc/fstab.new"
+rm "${B_ROOT_MOUNT_PATH}/etc/fstab"
+mv "${B_ROOT_MOUNT_PATH}/etc/fstab.new" "${B_ROOT_MOUNT_PATH}/etc/fstab"
 
+set +x
 echo ---- begin fstab after ---- 1>&2
 cat "${B_ROOT_MOUNT_PATH}/etc/fstab" 1>&2
 echo ---- end fstab after ---- 1>&2
+set -x
 
+set +x
 echo ---- begin resize2fs_once before ---- 1>&2
 cat "${B_ROOT_MOUNT_PATH}/etc/init.d/resize2fs_once" 1>&2
 echo ---- end resize2fs_once before ---- 1>&2
+set -x
 
 sed -i -e 's/\(^[^#]\s*\)resize2fs\(\s*\)/\1resize.f2fs\2/g' "${B_ROOT_MOUNT_PATH}/etc/init.d/resize2fs_once"
 
+set +x
 echo ---- begin resize2fs_once after ---- 1>&2
-cat "${B_BOOT_MOUNT_PATH}/cmdline.txt" 1>&2
+cat "${B_ROOT_MOUNT_PATH}/etc/init.d/resize2fs_once" 1>&2
 echo ---- end resize2fs_once after ---- 1>&2
+set -x
 
-sed -i -e 's/\(rootfstype=\)[^[:space:]]\+/\1f2fs/g' "${B_BOOT_MOUNT_PATH}/cmdline.txt"
-
+set +x
 echo ---- begin cmdline before ---- 1>&2
 cat "${B_BOOT_MOUNT_PATH}/cmdline.txt" 1>&2
 echo ---- end cmdline after ---- 1>&2
+set -x
+
+sed -i -e 's/\(rootfstype=\)[^[:space:]]\+/\1f2fs/g' "${B_BOOT_MOUNT_PATH}/cmdline.txt"
+
+set +x
+echo ---- begin cmdline after ---- 1>&2
+cat "${B_BOOT_MOUNT_PATH}/cmdline.txt" 1>&2
+echo ---- end cmdline after ---- 1>&2
+set -x
 
 umount "${LOOP_DEV_B_BOOT}"
 umount "${LOOP_DEV_B_ROOT}"
@@ -208,4 +232,6 @@ losetup -d "${LOOP_DEV_A}"
 rmdir "${A_ROOT_MOUNT_PATH}" "${B_ROOT_MOUNT_PATH}" "${B_BOOT_MOUNT_PATH}"
 rmdir "${MOUNT_PATH}"
 
-echo "Completed" 1>&2
+set +x
+echo "[info] Completed" 1>&2
+set -x
