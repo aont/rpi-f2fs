@@ -229,7 +229,7 @@ echo "---- end ${HF_PATH_LOCAL} after ----" 1>&2
 set -x
 
 # Remove resize2fs_once script
-rm "${B_ROOT_MOUNT_PATH}/etc/init.d/resize2fs_once"
+# rm "${B_ROOT_MOUNT_PATH}/etc/init.d/resize2fs_once"
 
 CMDLINE_PATH="${B_BOOT_MOUNT_PATH}/cmdline.txt"
 
@@ -259,6 +259,8 @@ echo ---- end /proc/mounts ---- 1>&2
 set -x
 
 hostname "$(< "${B_ROOT_MOUNT_PATH}/etc/hostname")"
+
+systemctl --root "${B_ROOT_MOUNT_PATH}" disable e2scrub_reap dphys-swapfile resize2fs_once
 
 # Enter chroot (ARM environment via QEMU) to install f2fs-tools inside the image
 chroot "${B_ROOT_MOUNT_PATH}" "${QEMU_PATH_CHROOT}" /bin/bash << EOS
