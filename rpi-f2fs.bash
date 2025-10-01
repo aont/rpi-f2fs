@@ -26,7 +26,7 @@ P1_NS=$(readlink /proc/1/ns/mnt)
 
 # If not, re-exec under unshare to isolate mount operations
 if [[ "${P1_NS}" = "${SELF_NS}" ]]; then
-    exec unshare --mount --fork /bin/bash "$0" "$@"
+    exec unshare --uts --mount --fork /bin/bash "$0" "$@"
 fi
 
 # Make mount points private so they don’t propagate to the host
@@ -163,6 +163,10 @@ chown "${SUDO_UID}:${SUDO_GID}" "${QEMU_BIND_PATH}"
 mount --bind "${QEMU_PATH}" "${QEMU_BIND_PATH}"
 QEMU_PATH_CHROOT="${QEMU_BIND_PATH#"$B_ROOT_MOUNT_PATH"}"
 
+RESOLV_CONF_PATH="$(readlink -f /etc/resolv.conf)"
+RESOLV_CONF_BIND_PATH="${B_ROOT_MOUNT_PATH}/etc/resolv.conf"
+mount --bind "${RESOLV_CONF_PATH}" "${RESOLV_CONF_BIND_PATH}"
+
 # Bind boot partition into the chroot’s boot mount path
 B_BOOT_PARTUUID="$(eval "$(blkid "${LOOP_DEV_B_BOOT}" | sed -e '1s/^.*:\s*//' -e 's/\s+/;/g')"; echo $PARTUUID)"
 B_BOOT_CHROOT_MOUNT_PATH="$(awk '$1=="PARTUUID='"${B_BOOT_PARTUUID}"'"{print $2;}' "${B_ROOT_MOUNT_PATH}/etc/fstab")"
@@ -254,12 +258,13 @@ echo "$(< /proc/mounts)" 1>&2
 echo ---- end /proc/mounts ---- 1>&2
 set -x
 
+hostname "$(< "${B_ROOT_MOUNT_PATH}/etc/hostname")"
+
 # Enter chroot (ARM environment via QEMU) to install f2fs-tools inside the image
-unshare --uts --fork chroot "${B_ROOT_MOUNT_PATH}" "${QEMU_PATH_CHROOT}" /bin/bash << EOS
+chroot "${B_ROOT_MOUNT_PATH}" "${QEMU_PATH_CHROOT}" /bin/bash << EOS
 set -xe
-hostname "\$(< /etc/hostname)"
 apt-get update
-apt-get install f2fs-tools
+apt-get install -y f2fs-tools
 apt-get clean
 EOS
 
@@ -269,6 +274,8 @@ for item in /sys /proc /dev/pts /dev; do
 done
 
 umount "${B_ROOT_MOUNT_PATH}${B_BOOT_CHROOT_MOUNT_PATH}"
+
+umount "${RESOLV_CONF_BIND_PATH}"
 
 umount "${QEMU_BIND_PATH}"
 rm "${QEMU_BIND_PATH}"
