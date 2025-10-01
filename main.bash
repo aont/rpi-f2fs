@@ -15,8 +15,6 @@ if [[ "$#" -ne 2 ]]; then
     exit 1
 fi
 
-# IMAGE_PATH_A=2025-05-13-raspios-bookworm-arm64-lite.img
-# IMAGE_PATH_B=2025-05-13-raspios-bookworm-arm64-lite-f2fs.img
 IMAGE_PATH_A="$1"
 IMAGE_PATH_B="$2"
 
@@ -105,8 +103,6 @@ LOOP_DEV_A_ROOT="${LOOP_DEV_A}p2"
 LOOP_DEV_B_BOOT="${LOOP_DEV_B}p1"
 LOOP_DEV_B_ROOT="${LOOP_DEV_B}p2"
 
-
-# sfdisk -d "${LOOP_DEV_A}" | sfdisk "${LOOP_DEV_B}"
 dd if="${LOOP_DEV_A}" of="${LOOP_DEV_B}" bs=512 count=1 conv=notrunc
 partprobe "${LOOP_DEV_B}"
 
@@ -127,18 +123,9 @@ chown "${SUDO_UID}:${SUDO_GID}" "${B_ROOT_MOUNT_PATH}"
 
 mount -o ro "${LOOP_DEV_A_ROOT}" "${A_ROOT_MOUNT_PATH}"
 mount "${LOOP_DEV_B_ROOT}" "${B_ROOT_MOUNT_PATH}"
-# udisksctl mount -b "${LOOP_DEV_A_ROOT}"
-# udisksctl mount -b "${LOOP_DEV_B_ROOT}"
-
-# cat /proc/mounts
-# A_ROOT_MOUNT_PATH="$(grep "${LOOP_DEV_A_ROOT}" /proc/mounts | cut -d ' ' -f 2)"
-# B_ROOT_MOUNT_PATH="$(grep "${LOOP_DEV_B_ROOT}" /proc/mounts | cut -d ' ' -f 2)"
-
-# exit 1
 
 rsync -aHAXx --numeric-ids --delete --info=progress2 ${A_ROOT_MOUNT_PATH}/ ${B_ROOT_MOUNT_PATH}/
 
-# udisksctl unmount -b "${LOOP_DEV_A_ROOT}"
 umount "${LOOP_DEV_A_ROOT}"
 
 losetup -d "${LOOP_DEV_B}"
@@ -147,12 +134,8 @@ B_BOOT_MOUNT_PATH=$(mktemp --tmpdir="${MOUNT_PATH}" --directory b_boot_XXXXX )
 chown "${SUDO_UID}:${SUDO_GID}" "${B_BOOT_MOUNT_PATH}"
 
 mount "${LOOP_DEV_B_BOOT}" "${B_BOOT_MOUNT_PATH}"
-# udisksctl mount -b "${LOOP_DEV_B_BOOT}"
-# B_BOOT_MOUNT_PATH="$(grep "${LOOP_DEV_B_BOOT}" /proc/mounts | cut -d ' ' -f 2)"
 
 QEMU_BIND_PATH=$(mktemp --tmpdir="${B_ROOT_MOUNT_PATH}/tmp" qemu_XXXXX)
-# QEMU_BIND_PATH="${B_ROOT_MOUNT_PATH}/${QEMU}"
-# touch "${QEMU_BIND_PATH}"
 chown "${SUDO_UID}:${SUDO_GID}" "${QEMU_BIND_PATH}"
 mount --bind "${QEMU_PATH}" "${QEMU_BIND_PATH}"
 QEMU_PATH_CHROOT="${QEMU_BIND_PATH#"$B_ROOT_MOUNT_PATH"}"
@@ -174,8 +157,6 @@ set -x
 FSTAB_NEW="$(awk '$1=="PARTUUID='"${B_ROOT_PARTUUID}"'"{print $1, $2, "f2fs", "defaults,noatime,background_gc=on,discard", 0, 0; next} {print;}' "${FSTAB_PATH}")"
 echo "${FSTAB_NEW}" > "${FSTAB_PATH}"
 unset FSTAB_NEW
-# rm "${B_ROOT_MOUNT_PATH}/etc/fstab"
-# mv "${B_ROOT_MOUNT_PATH}/etc/fstab.new" "${B_ROOT_MOUNT_PATH}/etc/fstab"
 
 set +x
 echo ---- begin fstab after ---- 1>&2
@@ -218,20 +199,6 @@ echo "---- end ${HF_PATH_LOCAL} after ----" 1>&2
 set -x
 
 rm "${B_ROOT_MOUNT_PATH}/etc/init.d/resize2fs_once"
-
-# set +x
-# echo ---- begin resize2fs_once before ---- 1>&2
-# echo "$(< "${B_ROOT_MOUNT_PATH}/etc/init.d/resize2fs_once")" 1>&2
-# echo ---- end resize2fs_once before ---- 1>&2
-# set -x
-
-# sed -i -e 's/\(^[^#]\s*\)resize2fs\(\s*\)/\1resize.f2fs\2/g' "${B_ROOT_MOUNT_PATH}/etc/init.d/resize2fs_once"
-
-# set +x
-# echo ---- begin resize2fs_once after ---- 1>&2
-# echo "$(< "${B_ROOT_MOUNT_PATH}/etc/init.d/resize2fs_once")" 1>&2
-# echo ---- end resize2fs_once after ---- 1>&2
-# set -x
 
 CMDLINE_PATH="${B_BOOT_MOUNT_PATH}/cmdline.txt"
 
@@ -278,8 +245,6 @@ rm "${QEMU_BIND_PATH}"
 
 umount "${LOOP_DEV_B_BOOT}"
 umount "${LOOP_DEV_B_ROOT}"
-# udisksctl unmount -b "${LOOP_DEV_B_BOOT}"
-# udisksctl unmount -b "${LOOP_DEV_B_ROOT}"
 
 losetup -d "${LOOP_DEV_A}"
 
