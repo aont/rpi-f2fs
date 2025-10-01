@@ -85,7 +85,7 @@ chown "${SUDO_UID}:${SUDO_GID}" "${MOUNT_PATH}"
 QEMU_PATH="$(command -v "${QEMU}")"
 
 # Check for required packages; install any missing
-pkgs=(partclone f2fs-tools qemu-user-static util-linux rsync coreutils grep)
+pkgs=(partclone f2fs-tools qemu-user-static jq util-linux rsync coreutils grep)
 missing=()
 for pkg in "${pkgs[@]}"; do
     if ! dpkg -s "$pkg" >/dev/null 2>&1; then
