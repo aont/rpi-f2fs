@@ -26,6 +26,27 @@ P1_NS=$(readlink /proc/1/ns/mnt)
 
 # If not, re-exec under unshare to isolate mount operations
 if [[ "${P1_NS}" = "${SELF_NS}" ]]; then
+
+    # Function: detach any loop devices associated with given image(s)
+    losetup_d_loop() {
+        for image_path in "$@"; do
+            while true;
+            do
+                loop_dev="$(losetup -j "${image_path}" | sed 's/:.*//')"
+                if [[ -z "$loop_dev" ]]; then
+                    break
+                else
+                    umount -f "${loop_dev}p1" || true
+                    umount -f "${loop_dev}p2" || true
+                    losetup -d "$loop_dev"
+                fi
+            done
+        done
+    }
+
+    # Cleanup any stale loop devices for the input/output images
+    losetup_d_loop "${IMAGE_PATH_A}" "${IMAGE_PATH_B}"
+
     exec unshare --uts --mount --fork /bin/bash "$0" "$@"
 fi
 
@@ -48,27 +69,6 @@ if [[ -f "${IMAGE_PATH_B}" ]]; then
         fi
     done
 fi
-
-# Function: detach any loop devices associated with given image(s)
-losetup_d_loop() {
-    for image_path in "$@"; do
-        while true;
-        do
-            loop_dev="$(losetup -j "${image_path}" | sed 's/:.*//')"
-            if [[ -z "$loop_dev" ]]; then
-                break
-            else
-                umount "${loop_dev}p1" || true
-                umount "${loop_dev}p2" || true
-                losetup -d "$loop_dev"
-            fi
-        done
-    done
-}
-
-# Cleanup any stale loop devices for the input/output images
-losetup_d_loop "${IMAGE_PATH_A}"
-losetup_d_loop "${IMAGE_PATH_B}"
 
 # Ensure UID/GID are set for ownership handling
 if [[ -z "$SUDO_UID" ]]; then
@@ -149,7 +149,7 @@ rsync -aHAXx --numeric-ids --delete --info=progress2 ${A_ROOT_MOUNT_PATH}/ ${B_R
 # Unmount source root and release its loop device
 umount "${LOOP_DEV_A_ROOT}"
 
-losetup -d "${LOOP_DEV_B}"
+losetup -d "${LOOP_DEV_A}"
 
 # Mount boot partition of target
 B_BOOT_MOUNT_PATH=$(mktemp --tmpdir="${MOUNT_PATH}" --directory b_boot_XXXXX )
@@ -283,7 +283,7 @@ rm "${QEMU_BIND_PATH}"
 umount "${LOOP_DEV_B_BOOT}"
 umount "${LOOP_DEV_B_ROOT}"
 
-losetup -d "${LOOP_DEV_A}"
+losetup -d "${LOOP_DEV_B}"
 
 # Remove temporary mount directories
 rmdir "${A_ROOT_MOUNT_PATH}" "${B_ROOT_MOUNT_PATH}" "${B_BOOT_MOUNT_PATH}"
