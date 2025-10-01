@@ -140,7 +140,9 @@ B_ROOT_PARTUUID="$(get_blkid_field "${LOOP_DEV_B_ROOT}" PARTUUID)"
 # B_ROOT_PARTUUID="$(eval "$(blkid "${LOOP_DEV_B_ROOT}" | sed -e '1s/^.*:\s*//' -e 's/\s+/;/g')"; echo $PARTUUID)"
 
 # Format target root partition as F2FS with same UUID
-mkfs.f2fs -f -l rootfs -U "${A_ROOT_UUID}" "${LOOP_DEV_B_ROOT}"
+mkfs.f2fs -f -l rootfs \
+    -O extra_attr,flexible_inline_xattr,inode_checksum,sb_checksum,inode_crtime,compression\
+    -U "${A_ROOT_UUID}" "${LOOP_DEV_B_ROOT}"
 
 losetup -d "${LOOP_DEV_B}"
 unset LOOP_DEV_B LOOP_DEV_B_BOOT LOOP_DEV_B_ROOT
@@ -201,7 +203,7 @@ echo ---- end fstab before ---- 1>&2
 set -x
 
 
-FSTAB_NEW="$(awk '$1=="PARTUUID='"${B_ROOT_PARTUUID}"'"{print $1, $2, "f2fs", "defaults,noatime,background_gc=on,discard", 0, 0; next} {print;}' "${FSTAB_PATH}")"
+FSTAB_NEW="$(awk '$1=="PARTUUID='"${B_ROOT_PARTUUID}"'"{print $1, $2, "f2fs", "noatime,lazytime,errors=remount-ro,fsync_mode=strict,background_gc=on,gc_merge,atgc,inline_xattr,inline_dentry,nodiscard", 0, 1; next} {print;}' "${FSTAB_PATH}")"
 echo "${FSTAB_NEW}" > "${FSTAB_PATH}"
 unset FSTAB_NEW
 
