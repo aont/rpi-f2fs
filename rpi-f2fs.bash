@@ -79,8 +79,8 @@ if [[ -z "$SUDO_GID" ]]; then
 fi
 
 # Temporary mount workspace
-MOUNT_PATH="${PWD}/.mountpath"
-if [[ -d "${MOUNT_PATH}" ]]; then rm -rf "${MOUNT_PATH}"; fi
+MOUNT_PATH=$(mktemp --tmpdir="${PWD}" --directory .mountpath-XXXXX)
+chown "${SUDO_UID}:${SUDO_GID}" "${MOUNT_PATH}"
 
 QEMU_PATH="$(command -v "${QEMU}")"
 
@@ -124,38 +124,58 @@ partprobe "${LOOP_DEV_B}"
 partclone.fat -s "${LOOP_DEV_A_BOOT}" -b -o "${LOOP_DEV_B_BOOT}"
 
 # Extract UUID from source root partition
-A_ROOT_UUID="$(eval "$(blkid "${LOOP_DEV_A_ROOT}" | sed -e '1s/^.*:\s*//' -e 's/\s+/;/g')"; echo $UUID)"
+get_blkid_field() {
+    local dev="$1" field="$2"
+    local UUID PARTUUID LABEL TYPE
+    eval "$(blkid "$dev" | sed -e '1s/^.*:\s*//' -e 's/\s\+/\;/g')"
+    eval "echo \$$field"
+}
+
+A_ROOT_UUID="$(get_blkid_field "${LOOP_DEV_A_ROOT}" UUID)"
+B_BOOT_PARTUUID="$(get_blkid_field "${LOOP_DEV_B_BOOT}" PARTUUID)"
+B_ROOT_PARTUUID="$(get_blkid_field "${LOOP_DEV_B_ROOT}" PARTUUID)"
+
+# A_ROOT_UUID="$(eval "$(blkid "${LOOP_DEV_A_ROOT}" | sed -e '1s/^.*:\s*//' -e 's/\s+/;/g')"; echo $UUID)"
+# B_BOOT_PARTUUID="$(eval "$(blkid "${LOOP_DEV_B_BOOT}" | sed -e '1s/^.*:\s*//' -e 's/\s+/;/g')"; echo $PARTUUID)"
+# B_ROOT_PARTUUID="$(eval "$(blkid "${LOOP_DEV_B_ROOT}" | sed -e '1s/^.*:\s*//' -e 's/\s+/;/g')"; echo $PARTUUID)"
 
 # Format target root partition as F2FS with same UUID
 mkfs.f2fs -f -l rootfs -U "${A_ROOT_UUID}" "${LOOP_DEV_B_ROOT}"
 
-# Prepare temporary mount directories
-mkdir "${MOUNT_PATH}"
-chown "${SUDO_UID}:${SUDO_GID}" "${MOUNT_PATH}"
+losetup -d "${LOOP_DEV_B}"
+unset LOOP_DEV_B LOOP_DEV_B_BOOT LOOP_DEV_B_ROOT
+losetup -d "${LOOP_DEV_A}"
+unset LOOP_DEV_A LOOP_DEV_A_BOOT LOOP_DEV_A_ROOT
 
+# Prepare temporary mount directories
 A_ROOT_MOUNT_PATH=$(mktemp --tmpdir="${MOUNT_PATH}" --directory a_root_XXXXX)
 chown "${SUDO_UID}:${SUDO_GID}" "${A_ROOT_MOUNT_PATH}"
 
 B_ROOT_MOUNT_PATH=$(mktemp --tmpdir="${MOUNT_PATH}" --directory b_root_XXXXX)
 chown "${SUDO_UID}:${SUDO_GID}" "${B_ROOT_MOUNT_PATH}"
 
+B_BOOT_MOUNT_PATH=$(mktemp --tmpdir="${MOUNT_PATH}" --directory b_boot_XXXXX )
+chown "${SUDO_UID}:${SUDO_GID}" "${B_BOOT_MOUNT_PATH}"
+
 # Mount source root read-only and target root read-write
-mount -o ro "${LOOP_DEV_A_ROOT}" "${A_ROOT_MOUNT_PATH}"
-mount "${LOOP_DEV_B_ROOT}" "${B_ROOT_MOUNT_PATH}"
+
+# Image A
+IMAGE_A_JSON="$(parted --json "$IMAGE_PATH_A" unit B print)"
+read IMAGE_A_ROOT_OFFSET IMAGE_A_ROOT_SIZE < <( echo "${IMAGE_A_JSON}" | jq -r '.disk.partitions[1] | [.start, .size] | map(sub("B$";"")) | @tsv') 
+mount -o "loop,ro,offset=${IMAGE_A_ROOT_OFFSET},sizelimit=${IMAGE_A_ROOT_SIZE}" "${IMAGE_PATH_A}" "${A_ROOT_MOUNT_PATH}"
+
+# Image B
+IMAGE_B_JSON="$(parted --json "$IMAGE_PATH_B" unit B print)"
+read IMAGE_B_BOOT_OFFSET IMAGE_B_BOOT_SIZE < <( echo "${IMAGE_B_JSON}" | jq -r '.disk.partitions[0] | [.start, .size] | map(sub("B$";"")) | @tsv') 
+read IMAGE_B_ROOT_OFFSET IMAGE_B_ROOT_SIZE < <( echo "${IMAGE_B_JSON}" | jq -r '.disk.partitions[1] | [.start, .size] | map(sub("B$";"")) | @tsv') 
+mount -o "loop,offset=${IMAGE_B_BOOT_OFFSET},sizelimit=${IMAGE_B_BOOT_SIZE}" "${IMAGE_PATH_B}" "${B_BOOT_MOUNT_PATH}"
+mount -o "loop,offset=${IMAGE_B_ROOT_OFFSET},sizelimit=${IMAGE_B_ROOT_SIZE}" "${IMAGE_PATH_B}" "${B_ROOT_MOUNT_PATH}"
 
 # Copy filesystem contents from ext4 root → f2fs root
 rsync -aHAXx --numeric-ids --delete --info=progress2 ${A_ROOT_MOUNT_PATH}/ ${B_ROOT_MOUNT_PATH}/
 
-# Unmount source root and release its loop device
-umount "${LOOP_DEV_A_ROOT}"
-
-losetup -d "${LOOP_DEV_A}"
-
-# Mount boot partition of target
-B_BOOT_MOUNT_PATH=$(mktemp --tmpdir="${MOUNT_PATH}" --directory b_boot_XXXXX )
-chown "${SUDO_UID}:${SUDO_GID}" "${B_BOOT_MOUNT_PATH}"
-
-mount "${LOOP_DEV_B_BOOT}" "${B_BOOT_MOUNT_PATH}"
+# Unmount source root
+umount "${A_ROOT_MOUNT_PATH}"
 
 # Bind-mount QEMU binary inside chroot so ARM binaries can run under emulation
 QEMU_BIND_PATH=$(mktemp --tmpdir="${B_ROOT_MOUNT_PATH}/tmp" qemu_XXXXX)
@@ -168,13 +188,10 @@ RESOLV_CONF_BIND_PATH="${B_ROOT_MOUNT_PATH}/etc/resolv.conf"
 mount --bind "${RESOLV_CONF_PATH}" "${RESOLV_CONF_BIND_PATH}"
 
 # Bind boot partition into the chroot’s boot mount path
-B_BOOT_PARTUUID="$(eval "$(blkid "${LOOP_DEV_B_BOOT}" | sed -e '1s/^.*:\s*//' -e 's/\s+/;/g')"; echo $PARTUUID)"
 B_BOOT_CHROOT_MOUNT_PATH="$(awk '$1=="PARTUUID='"${B_BOOT_PARTUUID}"'"{print $2;}' "${B_ROOT_MOUNT_PATH}/etc/fstab")"
 mount --bind "${B_BOOT_MOUNT_PATH}" "${B_ROOT_MOUNT_PATH}${B_BOOT_CHROOT_MOUNT_PATH}"
 
 # Update /etc/fstab to mount root as F2FS
-B_ROOT_PARTUUID="$(eval "$(blkid "${LOOP_DEV_B_ROOT}" | sed -e '1s/^.*:\s*//' -e 's/\s+/;/g')"; echo $PARTUUID)"
-
 FSTAB_PATH="${B_ROOT_MOUNT_PATH}/etc/fstab"
 
 set +x
@@ -182,6 +199,7 @@ echo ---- begin fstab before ---- 1>&2
 echo "$(< "${FSTAB_PATH}")" 1>&2
 echo ---- end fstab before ---- 1>&2
 set -x
+
 
 FSTAB_NEW="$(awk '$1=="PARTUUID='"${B_ROOT_PARTUUID}"'"{print $1, $2, "f2fs", "defaults,noatime,background_gc=on,discard", 0, 0; next} {print;}' "${FSTAB_PATH}")"
 echo "${FSTAB_NEW}" > "${FSTAB_PATH}"
@@ -280,10 +298,8 @@ umount "${RESOLV_CONF_BIND_PATH}"
 umount "${QEMU_BIND_PATH}"
 rm "${QEMU_BIND_PATH}"
 
-umount "${LOOP_DEV_B_BOOT}"
-umount "${LOOP_DEV_B_ROOT}"
-
-losetup -d "${LOOP_DEV_B}"
+umount "${B_BOOT_MOUNT_PATH}"
+umount "${B_ROOT_MOUNT_PATH}"
 
 # Remove temporary mount directories
 rmdir "${A_ROOT_MOUNT_PATH}" "${B_ROOT_MOUNT_PATH}" "${B_BOOT_MOUNT_PATH}"
