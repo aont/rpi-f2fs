@@ -152,7 +152,7 @@ done
 
 set +x
 echo ---- begin /proc/mounts ---- 1>&2
-cat /proc/mounts 1>&2
+echo "$(< /proc/mounts)" 1>&2
 echo ---- end /proc/mounts ---- 1>&2
 set -x
 
@@ -177,23 +177,23 @@ B_ROOT_PARTUUID="$(eval "$(blkid "${LOOP_DEV_B_ROOT}" | sed -e '1s/^.*:\s*//' -e
 
 set +x
 echo ---- begin fstab before ---- 1>&2
-cat "${B_ROOT_MOUNT_PATH}/etc/fstab" 1>&2
+echo "$(< "${B_ROOT_MOUNT_PATH}/etc/fstab")" 1>&2
 echo ---- end fstab before ---- 1>&2
 set -x
 
-awk '$1=="PARTUUID='"${B_ROOT_PARTUUID}"'"{print $1, "f2fs", "defaults,noatime,background_gc=on,discard", 0, 0; next} {print;}' "${B_ROOT_MOUNT_PATH}/etc/fstab" > "${B_ROOT_MOUNT_PATH}/etc/fstab.new"
+awk '$1=="PARTUUID='"${B_ROOT_PARTUUID}"'"{print $1, $2, "f2fs", "defaults,noatime,background_gc=on,discard", 0, 1; next} {print;}' "${B_ROOT_MOUNT_PATH}/etc/fstab" > "${B_ROOT_MOUNT_PATH}/etc/fstab.new"
 rm "${B_ROOT_MOUNT_PATH}/etc/fstab"
 mv "${B_ROOT_MOUNT_PATH}/etc/fstab.new" "${B_ROOT_MOUNT_PATH}/etc/fstab"
 
 set +x
 echo ---- begin fstab after ---- 1>&2
-cat "${B_ROOT_MOUNT_PATH}/etc/fstab" 1>&2
+echo "$(< "${B_ROOT_MOUNT_PATH}/etc/fstab")" 1>&2
 echo ---- end fstab after ---- 1>&2
 set -x
 
 set +x
 echo ---- begin resize2fs_once before ---- 1>&2
-cat "${B_ROOT_MOUNT_PATH}/etc/init.d/resize2fs_once" 1>&2
+echo "$(< "${B_ROOT_MOUNT_PATH}/etc/init.d/resize2fs_once")" 1>&2
 echo ---- end resize2fs_once before ---- 1>&2
 set -x
 
@@ -201,13 +201,13 @@ sed -i -e 's/\(^[^#]\s*\)resize2fs\(\s*\)/\1resize.f2fs\2/g' "${B_ROOT_MOUNT_PAT
 
 set +x
 echo ---- begin resize2fs_once after ---- 1>&2
-cat "${B_ROOT_MOUNT_PATH}/etc/init.d/resize2fs_once" 1>&2
+echo "$(< "${B_ROOT_MOUNT_PATH}/etc/init.d/resize2fs_once")" 1>&2
 echo ---- end resize2fs_once after ---- 1>&2
 set -x
 
 set +x
 echo ---- begin cmdline before ---- 1>&2
-cat "${B_BOOT_MOUNT_PATH}/cmdline.txt" 1>&2
+echo "$(< "${B_BOOT_MOUNT_PATH}/cmdline.txt")" 1>&2
 echo ---- end cmdline after ---- 1>&2
 set -x
 
@@ -215,7 +215,7 @@ sed -i -e 's/\(rootfstype=\)[^[:space:]]\+/\1f2fs/g' "${B_BOOT_MOUNT_PATH}/cmdli
 
 set +x
 echo ---- begin cmdline after ---- 1>&2
-cat "${B_BOOT_MOUNT_PATH}/cmdline.txt" 1>&2
+echo "$(< "${B_BOOT_MOUNT_PATH}/cmdline.txt")" 1>&2
 echo ---- end cmdline after ---- 1>&2
 set -x
 
