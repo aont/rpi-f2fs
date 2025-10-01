@@ -192,7 +192,7 @@ echo "$(< "${LPF_PATH}")" 1>&2
 echo "---- end ${LPF_PATH_LOCAL} before ----" 1>&2
 set -x
 
-sed -i -e 's/\(^[^#]\s*\)resize2fs\(\s*\)/\1resize.f2fs\2/g' "${LPF_PATH}"
+sed -i -e 's/^\([[:space:]]*\)resize2fs[[:space:]]\+.*[[:space:]]\+\"\$DEV\"[[:space:]]*$/\1resize.f2fs "$DEV"/' "${LPF_PATH}"
 
 set +x
 echo "---- begin ${LPF_PATH_LOCAL} after ----" 1>&2
