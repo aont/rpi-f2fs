@@ -180,7 +180,7 @@ umount "${A_ROOT_MOUNT_PATH}"
 # Bind-mount QEMU binary inside chroot so ARM binaries can run under emulation
 QEMU_BIND_PATH=$(mktemp --tmpdir="${B_ROOT_MOUNT_PATH}/tmp" qemu_XXXXX)
 chown "${SUDO_UID}:${SUDO_GID}" "${QEMU_BIND_PATH}"
-mount --bind "${QEMU_PATH}" "${QEMU_BIND_PATH}"
+mount -o ro --bind "${QEMU_PATH}" "${QEMU_BIND_PATH}"
 QEMU_PATH_CHROOT="${QEMU_BIND_PATH#"$B_ROOT_MOUNT_PATH"}"
 
 RESOLV_CONF_PATH=/etc/resolv.conf
