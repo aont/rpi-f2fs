@@ -183,9 +183,9 @@ chown "${SUDO_UID}:${SUDO_GID}" "${QEMU_BIND_PATH}"
 mount --bind "${QEMU_PATH}" "${QEMU_BIND_PATH}"
 QEMU_PATH_CHROOT="${QEMU_BIND_PATH#"$B_ROOT_MOUNT_PATH"}"
 
-RESOLV_CONF_PATH="$(readlink -f /etc/resolv.conf)"
+RESOLV_CONF_PATH=/etc/resolv.conf
 RESOLV_CONF_BIND_PATH="${B_ROOT_MOUNT_PATH}/etc/resolv.conf"
-mount --bind "${RESOLV_CONF_PATH}" "${RESOLV_CONF_BIND_PATH}"
+mount -o ro --bind "${RESOLV_CONF_PATH}" "${RESOLV_CONF_BIND_PATH}"
 
 # Bind boot partition into the chroot’s boot mount path
 B_BOOT_CHROOT_MOUNT_PATH="$(awk '$1=="PARTUUID='"${B_BOOT_PARTUUID}"'"{print $2;}' "${B_ROOT_MOUNT_PATH}/etc/fstab")"
