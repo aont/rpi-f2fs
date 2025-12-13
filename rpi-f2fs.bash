@@ -24,6 +24,11 @@ IMAGE_PATH_B="$2"   # Output (converted) image
 SELF_NS=$(readlink /proc/$$/ns/mnt)
 P1_NS=$(readlink /proc/1/ns/mnt)
 
+set +e
+systemctl is-active systemd-binfmt
+SYSTEMD_BINFMT_FLAG="$?"
+set -e
+
 # If not, re-exec under unshare to isolate mount operations
 if [[ "${P1_NS}" = "${SELF_NS}" ]]; then
 
@@ -71,10 +76,10 @@ if [[ -f "${IMAGE_PATH_B}" ]]; then
 fi
 
 # Ensure UID/GID are set for ownership handling
-if [[ -z "$SUDO_UID" ]]; then
+if [[ -z "${SUDO_UID+x}" ]]; then
     SUDO_UID=0
 fi
-if [[ -z "$SUDO_GID" ]]; then
+if [[ -z "${SUDO_GID+x}" ]]; then
     SUDO_GID=0
 fi
 
@@ -82,10 +87,11 @@ fi
 MOUNT_PATH=$(mktemp --tmpdir="${PWD}" --directory .mountpath-XXXXX)
 chown "${SUDO_UID}:${SUDO_GID}" "${MOUNT_PATH}"
 
-QEMU_PATH="$(command -v "${QEMU}")"
-
 # Check for required packages; install any missing
-pkgs=(partclone f2fs-tools qemu-user-static jq util-linux rsync coreutils grep)
+pkgs=(partclone f2fs-tools qemu-user-static jq util-linux rsync coreutils grep parted)
+if [[ ! "$SYSTEMD_BINFMT_FLAG" -eq "0" ]]; then
+    pkgs+=(binfmt-support)
+fi
 missing=()
 for pkg in "${pkgs[@]}"; do
     if ! dpkg -s "$pkg" >/dev/null 2>&1; then
@@ -97,6 +103,8 @@ if [ ${#missing[@]} -gt 0 ]; then
     apt-get update
     apt-get install -y "${missing[@]}"
 fi
+
+QEMU_PATH="$(command -v "${QEMU}")"
 
 # Allocate target image with the same size as source
 IMAGE_SIZE_A="$(du -b "${IMAGE_PATH_A}" | awk '{print $1;}')"
@@ -135,10 +143,6 @@ A_ROOT_UUID="$(get_blkid_field "${LOOP_DEV_A_ROOT}" UUID)"
 B_BOOT_PARTUUID="$(get_blkid_field "${LOOP_DEV_B_BOOT}" PARTUUID)"
 B_ROOT_PARTUUID="$(get_blkid_field "${LOOP_DEV_B_ROOT}" PARTUUID)"
 
-# A_ROOT_UUID="$(eval "$(blkid "${LOOP_DEV_A_ROOT}" | sed -e '1s/^.*:\s*//' -e 's/\s+/;/g')"; echo $UUID)"
-# B_BOOT_PARTUUID="$(eval "$(blkid "${LOOP_DEV_B_BOOT}" | sed -e '1s/^.*:\s*//' -e 's/\s+/;/g')"; echo $PARTUUID)"
-# B_ROOT_PARTUUID="$(eval "$(blkid "${LOOP_DEV_B_ROOT}" | sed -e '1s/^.*:\s*//' -e 's/\s+/;/g')"; echo $PARTUUID)"
-
 # Format target root partition as F2FS with same UUID
 mkfs.f2fs -f -l rootfs -U "${A_ROOT_UUID}" "${LOOP_DEV_B_ROOT}"
 
@@ -160,12 +164,12 @@ chown "${SUDO_UID}:${SUDO_GID}" "${B_BOOT_MOUNT_PATH}"
 # Mount source root read-only and target root read-write
 
 # Image A
-IMAGE_A_JSON="$(parted --json "$IMAGE_PATH_A" unit B print)"
+IMAGE_A_JSON="$(parted --json "$IMAGE_PATH_A" unit B print | jq -c .)"
 read IMAGE_A_ROOT_OFFSET IMAGE_A_ROOT_SIZE < <( echo "${IMAGE_A_JSON}" | jq -r '.disk.partitions[1] | [.start, .size] | map(sub("B$";"")) | @tsv') 
 mount -o "loop,ro,offset=${IMAGE_A_ROOT_OFFSET},sizelimit=${IMAGE_A_ROOT_SIZE}" "${IMAGE_PATH_A}" "${A_ROOT_MOUNT_PATH}"
 
 # Image B
-IMAGE_B_JSON="$(parted --json "$IMAGE_PATH_B" unit B print)"
+IMAGE_B_JSON="$(parted --json "$IMAGE_PATH_B" unit B print | jq -c .)"
 read IMAGE_B_BOOT_OFFSET IMAGE_B_BOOT_SIZE < <( echo "${IMAGE_B_JSON}" | jq -r '.disk.partitions[0] | [.start, .size] | map(sub("B$";"")) | @tsv') 
 read IMAGE_B_ROOT_OFFSET IMAGE_B_ROOT_SIZE < <( echo "${IMAGE_B_JSON}" | jq -r '.disk.partitions[1] | [.start, .size] | map(sub("B$";"")) | @tsv') 
 mount -o "loop,offset=${IMAGE_B_BOOT_OFFSET},sizelimit=${IMAGE_B_BOOT_SIZE}" "${IMAGE_PATH_B}" "${B_BOOT_MOUNT_PATH}"
@@ -178,7 +182,8 @@ rsync -aHAXx --numeric-ids --delete --info=progress2 ${A_ROOT_MOUNT_PATH}/ ${B_R
 umount "${A_ROOT_MOUNT_PATH}"
 
 # Bind-mount QEMU binary inside chroot so ARM binaries can run under emulation
-QEMU_BIND_PATH=$(mktemp --tmpdir="${B_ROOT_MOUNT_PATH}/tmp" qemu_XXXXX)
+QEMU_BIND_PATH="${B_ROOT_MOUNT_PATH}"/usr/bin/qemu-aarch64-static
+touch "${QEMU_BIND_PATH}"
 chown "${SUDO_UID}:${SUDO_GID}" "${QEMU_BIND_PATH}"
 mount -o ro --bind "${QEMU_PATH}" "${QEMU_BIND_PATH}"
 QEMU_PATH_CHROOT="${QEMU_BIND_PATH#"$B_ROOT_MOUNT_PATH"}"
@@ -214,37 +219,41 @@ set -x
 LPF_PATH_LOCAL=/usr/share/initramfs-tools/scripts/local-premount/firstboot
 LPF_PATH="${B_ROOT_MOUNT_PATH}${LPF_PATH_LOCAL}"
 
-set +x
-echo "---- begin ${LPF_PATH_LOCAL} before ----" 1>&2
-echo "$(< "${LPF_PATH}")" 1>&2
-echo "---- end ${LPF_PATH_LOCAL} before ----" 1>&2
-set -x
+if [[ -f "$LPF_PATH" ]]; then
+    set +x
+    echo "---- begin ${LPF_PATH_LOCAL} before ----" 1>&2
+    echo "$(< "${LPF_PATH}")" 1>&2
+    echo "---- end ${LPF_PATH_LOCAL} before ----" 1>&2
+    set -x
 
-# Replace initramfs scripts to use resize.f2fs instead of resize2fs
-sed -i -e 's/^\([[:space:]]*\)resize2fs[[:space:]]\+.*[[:space:]]\+\"\$DEV\"[[:space:]]*$/\1resize.f2fs "$DEV"/' "${LPF_PATH}"
+    # Replace initramfs scripts to use resize.f2fs instead of resize2fs
+    sed -i -e 's/^\([[:space:]]*\)resize2fs[[:space:]]\+.*[[:space:]]\+\"\$DEV\"[[:space:]]*$/\1resize.f2fs "$DEV"/' "${LPF_PATH}"
 
-set +x
-echo "---- begin ${LPF_PATH_LOCAL} after ----" 1>&2
-echo "$(< "${LPF_PATH}")" 1>&2
-echo "---- end ${LPF_PATH_LOCAL} after ----" 1>&2
-set -x
+    set +x
+    echo "---- begin ${LPF_PATH_LOCAL} after ----" 1>&2
+    echo "$(< "${LPF_PATH}")" 1>&2
+    echo "---- end ${LPF_PATH_LOCAL} after ----" 1>&2
+    set -x
+fi
 
 HF_PATH_LOCAL=/usr/share/initramfs-tools/hooks/firstboot
 HF_PATH="${B_ROOT_MOUNT_PATH}${HF_PATH_LOCAL}"
 
-set +x
-echo "---- begin ${HF_PATH_LOCAL} before ----" 1>&2
-echo "$(< "${HF_PATH}")" 1>&2
-echo "---- end ${HF_PATH_LOCAL} before ----" 1>&2
-set -x
+if [[ -f "$HF_PATH" ]]; then
+    set +x
+    echo "---- begin ${HF_PATH_LOCAL} before ----" 1>&2
+    echo "$(< "${HF_PATH}")" 1>&2
+    echo "---- end ${HF_PATH_LOCAL} before ----" 1>&2
+    set -x
 
-sed -i -e 's/resize2fs/resize.f2fs/g' "${HF_PATH}"
+    sed -i -e 's/resize2fs/resize.f2fs/g' "${HF_PATH}"
 
-set +x
-echo "---- begin ${HF_PATH_LOCAL} after ----" 1>&2
-echo "$(< "${HF_PATH}")" 1>&2
-echo "---- end ${HF_PATH_LOCAL} after ----" 1>&2
-set -x
+    set +x
+    echo "---- begin ${HF_PATH_LOCAL} after ----" 1>&2
+    echo "$(< "${HF_PATH}")" 1>&2
+    echo "---- end ${HF_PATH_LOCAL} after ----" 1>&2
+    set -x
+fi
 
 CMDLINE_PATH="${B_BOOT_MOUNT_PATH}/cmdline.txt"
 
@@ -275,15 +284,27 @@ set -x
 
 hostname "$(< "${B_ROOT_MOUNT_PATH}/etc/hostname")"
 
-systemctl --root "${B_ROOT_MOUNT_PATH}" disable e2scrub_reap dphys-swapfile resize2fs_once
+# dphys-swapfile resize2fs_once
+systemctl --root "${B_ROOT_MOUNT_PATH}" disable e2scrub_reap
+
+set +e
+systemctl --root "${B_ROOT_MOUNT_PATH}" disable dphys-swapfile resize2fs_once
+set -e
 
 # Enter chroot (ARM environment via QEMU) to install f2fs-tools inside the image
-chroot "${B_ROOT_MOUNT_PATH}" "${QEMU_PATH_CHROOT}" /bin/bash << EOS
-set -xe
-apt-get update
-apt-get install -y f2fs-tools
-apt-get clean
-EOS
+if [[ ! "$SYSTEMD_BINFMT_FLAG" -eq "0" ]]; then
+    update-binfmts --package qemu-user --install qemu-aarch64 "$QEMU_PATH" --magic '\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xb7\x00'  --mask '\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff'
+fi
+
+CHROOT_QEMU=(chroot "${B_ROOT_MOUNT_PATH}" "${QEMU_PATH_CHROOT}")
+"${CHROOT_QEMU[@]}" /bin/bash -c "echo hello chroot qemu"
+"${CHROOT_QEMU[@]}" /usr/bin/apt-get update
+"${CHROOT_QEMU[@]}" /usr/bin/apt-get install -y f2fs-tools
+"${CHROOT_QEMU[@]}" /usr/bin/apt-get clean
+
+if [[ ! "$SYSTEMD_BINFMT_FLAG" -eq "0" ]]; then
+  update-binfmts --package qemu-user --remove qemu-aarch64 "$QEMU_PATH"
+fi
 
 # Cleanup mounts
 for item in /sys /proc /dev/pts /dev; do
