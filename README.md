@@ -70,6 +70,21 @@ image.
    flash the new image to an SD card with tools like `rpi-imager`, `dd`, or
    `balenaEtcher`.
 
+## Automated GitHub Releases with GitHub Actions
+
+This repository includes a workflow file at
+[`/.github/workflows/build-image.yml`](./.github/workflows/build-image.yml).
+You can run this workflow manually from the **Actions** tab (`workflow_dispatch`),
+and it will:
+
+1. Download the Raspberry Pi OS source image.
+2. Build a converted F2FS image using `rpi-f2fs.bash`.
+3. Create (or update) a GitHub Release using the specified tag.
+4. Upload the generated image artifact to that Release.
+
+In short, this workflow allows you to publish ready-to-use F2FS Raspberry Pi
+images directly to **GitHub Releases** without building locally.
+
 ## What the script does
 
 The script performs the following high-level steps:
