@@ -58,7 +58,10 @@ fi
 # Make mount points private so they don’t propagate to the host
 mount --make-rprivate /
 
-QEMU=qemu-aarch64-static
+QEMU=
+QEMU_BINFMT_NAME=
+QEMU_BINFMT_MAGIC=
+QEMU_BINFMT_MASK=
 
 # If target image exists, ask user whether to overwrite
 if [[ -f "${IMAGE_PATH_B}" ]]; then
@@ -88,7 +91,7 @@ MOUNT_PATH=$(mktemp --tmpdir="${PWD}" --directory .mountpath-XXXXX)
 chown "${SUDO_UID}:${SUDO_GID}" "${MOUNT_PATH}"
 
 # Check for required packages; install any missing
-pkgs=(partclone f2fs-tools qemu-user-static jq util-linux rsync coreutils grep parted)
+pkgs=(partclone f2fs-tools qemu-user-static jq util-linux rsync coreutils grep parted binutils)
 if [[ ! "$SYSTEMD_BINFMT_FLAG" -eq "0" ]]; then
     pkgs+=(binfmt-support)
 fi
@@ -103,8 +106,6 @@ if [ ${#missing[@]} -gt 0 ]; then
     apt-get update
     apt-get install -y "${missing[@]}"
 fi
-
-QEMU_PATH="$(command -v "${QEMU}")"
 
 # Allocate target image with the same size as source
 IMAGE_SIZE_A="$(du -b "${IMAGE_PATH_A}" | awk '{print $1;}')"
@@ -175,6 +176,46 @@ read IMAGE_B_ROOT_OFFSET IMAGE_B_ROOT_SIZE < <( echo "${IMAGE_B_JSON}" | jq -r '
 mount -o "loop,offset=${IMAGE_B_BOOT_OFFSET},sizelimit=${IMAGE_B_BOOT_SIZE}" "${IMAGE_PATH_B}" "${B_BOOT_MOUNT_PATH}"
 mount -o "loop,offset=${IMAGE_B_ROOT_OFFSET},sizelimit=${IMAGE_B_ROOT_SIZE}" "${IMAGE_PATH_B}" "${B_ROOT_MOUNT_PATH}"
 
+detect_rootfs_qemu() {
+    local root="$1"
+    local machine=""
+    local candidate
+    local -a candidates=(
+        /bin/bash
+        /bin/sh
+        /usr/bin/bash
+        /usr/bin/env
+        /sbin/init
+        /usr/lib/systemd/systemd
+    )
+
+    for candidate in "${candidates[@]}"; do
+        if [[ -f "${root}${candidate}" ]]; then
+            machine="$(readelf -h "${root}${candidate}" 2>/dev/null | awk -F: '/Machine:/ {gsub(/^ +/, "", $2); print $2; exit}')"
+            if [[ -n "${machine}" ]]; then
+                break
+            fi
+        fi
+    done
+
+    case "${machine}" in
+        AArch64)
+            echo "qemu-aarch64-static qemu-aarch64 \\x7fELF\\x02\\x01\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\xb7\\x00 \\xff\\xff\\xff\\xff\\xff\\xff\\xff\\x00\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xfe\\xff\\xff\\xff"
+            ;;
+        ARM)
+            echo "qemu-arm-static qemu-arm \\x7fELF\\x01\\x01\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x28\\x00 \\xff\\xff\\xff\\xff\\xff\\xff\\xff\\x00\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xfe\\xff\\xff\\xff"
+            ;;
+        *)
+            echo "Unsupported or undetected rootfs CPU architecture: ${machine:-unknown}" 1>&2
+            return 1
+            ;;
+    esac
+}
+
+read QEMU QEMU_BINFMT_NAME QEMU_BINFMT_MAGIC QEMU_BINFMT_MASK < <(detect_rootfs_qemu "${A_ROOT_MOUNT_PATH}")
+QEMU_PATH="$(command -v "${QEMU}")"
+QEMU_BIND_PATH="${B_ROOT_MOUNT_PATH}/usr/bin/${QEMU}"
+
 # Copy filesystem contents from ext4 root → f2fs root
 #
 # In CI (especially GitHub Actions), `--info=progress2` can emit extremely long
@@ -192,7 +233,6 @@ rsync -aHAXx --numeric-ids --delete --info="${RSYNC_INFO}" "${A_ROOT_MOUNT_PATH}
 umount "${A_ROOT_MOUNT_PATH}"
 
 # Bind-mount QEMU binary inside chroot so ARM binaries can run under emulation
-QEMU_BIND_PATH="${B_ROOT_MOUNT_PATH}"/usr/bin/qemu-aarch64-static
 touch "${QEMU_BIND_PATH}"
 chown "${SUDO_UID}:${SUDO_GID}" "${QEMU_BIND_PATH}"
 mount -o ro --bind "${QEMU_PATH}" "${QEMU_BIND_PATH}"
@@ -303,7 +343,7 @@ set -e
 
 # Enter chroot (ARM environment via QEMU) to install f2fs-tools inside the image
 if [[ ! "$SYSTEMD_BINFMT_FLAG" -eq "0" ]]; then
-    update-binfmts --package qemu-user --install qemu-aarch64 "$QEMU_PATH" --magic '\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xb7\x00'  --mask '\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff'
+    update-binfmts --package qemu-user --install "${QEMU_BINFMT_NAME}" "$QEMU_PATH" --magic "${QEMU_BINFMT_MAGIC}" --mask "${QEMU_BINFMT_MASK}"
 fi
 
 CHROOT_QEMU=(chroot "${B_ROOT_MOUNT_PATH}" "${QEMU_PATH_CHROOT}")
@@ -313,7 +353,7 @@ CHROOT_QEMU=(chroot "${B_ROOT_MOUNT_PATH}" "${QEMU_PATH_CHROOT}")
 "${CHROOT_QEMU[@]}" /usr/bin/apt-get clean
 
 if [[ ! "$SYSTEMD_BINFMT_FLAG" -eq "0" ]]; then
-  update-binfmts --package qemu-user --remove qemu-aarch64 "$QEMU_PATH"
+  update-binfmts --package qemu-user --remove "${QEMU_BINFMT_NAME}" "$QEMU_PATH"
 fi
 
 # Cleanup mounts
