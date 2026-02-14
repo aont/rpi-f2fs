@@ -252,6 +252,15 @@ jobs:
         run: |
           SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
+          ssh ${SSH_OPTS} -i vm/id_ed25519 -p 2222 ubuntu@127.0.0.1 '
+            set -euo pipefail
+            KREL="$(uname -r)"
+            sudo apt-get update
+            sudo apt-get install -y "linux-modules-extra-${KREL}"
+            sudo modprobe f2fs
+            grep -w f2fs /proc/filesystems
+          '
+
           ssh ${SSH_OPTS} -i vm/id_ed25519 -p 2222 ubuntu@127.0.0.1 "mkdir -p ~/work"
           scp ${SSH_OPTS} -i vm/id_ed25519 -P 2222 ./rpi-f2fs.bash "ubuntu@127.0.0.1:~/work/rpi-f2fs.bash"
           scp ${SSH_OPTS} -i vm/id_ed25519 -P 2222 "./${SRC_IMAGE_NAME}" "ubuntu@127.0.0.1:~/work/${SRC_IMAGE_NAME}"
