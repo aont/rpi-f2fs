@@ -59,23 +59,17 @@ jobs:
             echo "src_image_name=${SRC_IMAGE_NAME}"
             echo "out_image_name=${OUT_IMAGE_NAME}"
             echo "release_tag=${RELEASE_TAG}"
-            echo "artifact_name=source-image-${IMAGE_NAME}"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Try reusing cached source artifact from latest successful run
-        id: download_cached
-        uses: dawidd6/action-download-artifact@v9
-        continue-on-error: true
+      - name: Restore cached source image
+        id: cache-source-image
+        uses: actions/cache@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: build-image.yml
-          workflow_conclusion: success
-          name: ${{ steps.meta.outputs.artifact_name }}
-          path: .cache
-          if_no_artifact_found: warn
+          path: .cache/${{ steps.meta.outputs.image_xz_name }}
+          key: source-image-${{ runner.os }}-${{ steps.meta.outputs.image_name }}
 
       - name: Download source image
-        if: steps.download_cached.outcome != 'success' || hashFiles(format('.cache/{0}', steps.meta.outputs.image_xz_name)) == ''
+        if: steps.cache-source-image.outputs.cache-hit != 'true'
         env:
           IMAGE_URL: ${{ steps.meta.outputs.image_url }}
           IMAGE_XZ_NAME: ${{ steps.meta.outputs.image_xz_name }}
@@ -92,14 +86,6 @@ jobs:
         run: |
           set -euo pipefail
           test -s ".cache/${IMAGE_XZ_NAME}"
-
-      - name: Upload source image artifact for cache reuse
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.meta.outputs.artifact_name }}
-          path: .cache/${{ steps.meta.outputs.image_xz_name }}
-          if-no-files-found: error
-          retention-days: 14
 
       - name: Unpack source image
         env:
