@@ -176,7 +176,17 @@ mount -o "loop,offset=${IMAGE_B_BOOT_OFFSET},sizelimit=${IMAGE_B_BOOT_SIZE}" "${
 mount -o "loop,offset=${IMAGE_B_ROOT_OFFSET},sizelimit=${IMAGE_B_ROOT_SIZE}" "${IMAGE_PATH_B}" "${B_ROOT_MOUNT_PATH}"
 
 # Copy filesystem contents from ext4 root → f2fs root
-rsync -aHAXx --numeric-ids --delete --info=progress2 ${A_ROOT_MOUNT_PATH}/ ${B_ROOT_MOUNT_PATH}/
+#
+# In CI (especially GitHub Actions), `--info=progress2` can emit extremely long
+# logs because the runner is non-interactive. Default to summary stats there,
+# while keeping local interactive progress output by default.
+RSYNC_INFO_DEFAULT="stats2"
+if [[ -t 1 && "${GITHUB_ACTIONS:-}" != "true" ]]; then
+    RSYNC_INFO_DEFAULT="progress2,stats2"
+fi
+RSYNC_INFO="${RSYNC_INFO:-${RSYNC_INFO_DEFAULT}}"
+
+rsync -aHAXx --numeric-ids --delete --info="${RSYNC_INFO}" "${A_ROOT_MOUNT_PATH}/" "${B_ROOT_MOUNT_PATH}/"
 
 # Unmount source root
 umount "${A_ROOT_MOUNT_PATH}"

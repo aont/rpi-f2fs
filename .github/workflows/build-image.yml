@@ -235,6 +235,7 @@ jobs:
         env:
           SRC_IMAGE_NAME: ${{ steps.meta.outputs.src_image_name }}
           OUT_IMAGE_NAME: ${{ steps.meta.outputs.out_image_name }}
+          RSYNC_INFO: stats2
         run: |
           SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
@@ -252,7 +253,7 @@ jobs:
           scp ${SSH_OPTS} -i vm/id_ed25519 -P 2222 "./${SRC_IMAGE_NAME}" "ubuntu@127.0.0.1:~/work/${SRC_IMAGE_NAME}"
 
           ssh ${SSH_OPTS} -i vm/id_ed25519 -p 2222 ubuntu@127.0.0.1 \
-            "chmod +x ~/work/rpi-f2fs.bash && sudo bash ~/work/rpi-f2fs.bash ~/work/${SRC_IMAGE_NAME} ~/work/${OUT_IMAGE_NAME}"
+            "chmod +x ~/work/rpi-f2fs.bash && sudo RSYNC_INFO=${RSYNC_INFO} bash ~/work/rpi-f2fs.bash ~/work/${SRC_IMAGE_NAME} ~/work/${OUT_IMAGE_NAME}"
 
           scp ${SSH_OPTS} -i vm/id_ed25519 -P 2222 "ubuntu@127.0.0.1:~/work/${OUT_IMAGE_NAME}" "./${OUT_IMAGE_NAME}"
 
