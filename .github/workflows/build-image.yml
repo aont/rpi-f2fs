@@ -6,7 +6,7 @@ on:
       image_url:
         description: Raspberry Pi OS image URL
         required: false
-        default: https://downloads.raspberrypi.com/raspios_arm64/images/raspios_arm64-2025-12-04/2025-12-04-raspios-trixie-arm64.img.xz
+        default: https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2025-12-04/2025-12-04-raspios-trixie-arm64-lite.img.xz
       release_tag:
         description: Release tag name (optional). If empty, auto-generate from commit date/commit id.
         required: false
