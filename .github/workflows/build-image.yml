@@ -67,7 +67,7 @@ jobs:
           if_no_artifact_found: warn
 
       - name: Download source image
-        if: steps.download_cached.outcome != 'success'
+        if: steps.download_cached.outcome != 'success' || hashFiles(format('.cache/{0}', steps.meta.outputs.image_xz_name)) == ''
         env:
           IMAGE_URL: ${{ steps.meta.outputs.image_url }}
           IMAGE_XZ_NAME: ${{ steps.meta.outputs.image_xz_name }}
