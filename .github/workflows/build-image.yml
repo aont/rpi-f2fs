@@ -8,7 +8,7 @@ on:
         required: false
         default: https://downloads.raspberrypi.com/raspios_arm64/images/raspios_arm64-2025-12-04/2025-12-04-raspios-trixie-arm64.img.xz
       release_tag:
-        description: Release tag name (optional). If empty, auto-generate from date/commit/image name.
+        description: Release tag name (optional). If empty, auto-generate from commit date/commit id.
         required: false
         default: ""
 
@@ -49,7 +49,7 @@ jobs:
           if [[ -n "${INPUT_RELEASE_TAG:-}" ]]; then
             RELEASE_TAG="${INPUT_RELEASE_TAG}"
           else
-            RELEASE_TAG="$(date -u +%F)-${GITHUB_SHA::7}-${IMAGE_NAME}"
+            RELEASE_TAG="$(git show -s --format=%cs HEAD)-${GITHUB_SHA::7}"
           fi
 
           {
