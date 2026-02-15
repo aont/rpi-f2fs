@@ -1,4 +1,4 @@
-name: Build Raspberry Pi F2FS image
+name: Build Raspberry Pi F2FS image with QEMU
 
 on:
   workflow_dispatch:
