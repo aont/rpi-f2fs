@@ -24,10 +24,6 @@ jobs:
   build-and-release:
     runs-on: ubuntu-24.04
 
-    env:
-      UBUNTU_MINIMAL_IMG_URL: https://cloud-images.ubuntu.com/minimal/releases/noble/release/ubuntu-24.04-minimal-cloudimg-amd64.img
-      UBUNTU_MINIMAL_IMG_NAME: ubuntu-24.04-minimal-cloudimg-amd64.img
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -95,186 +91,30 @@ jobs:
           cp ".cache/${IMAGE_XZ_NAME}" .
           xz -T0 -dk "${IMAGE_XZ_NAME}"
 
-      - name: Install deps (qemu/kvm + cloud-init + ssh tooling)
+      - name: Install deps and enable f2fs on runner
         run: |
+          set -euo pipefail
+          KREL="$(uname -r)"
+
           sudo apt-get update
           sudo apt-get install -y \
             util-linux \
-            qemu-system-x86 qemu-utils qemu-kvm \
-            cloud-image-utils genisoimage \
-            openssh-client netcat-openbsd curl
+            rsync \
+            curl \
+            "linux-modules-extra-${KREL}"
 
-          command -v sg
-          qemu-system-x86_64 --version
+          sudo modprobe f2fs
+          grep -w f2fs /proc/filesystems
 
-      - name: Ensure KVM access via kvm group + sg
-        run: |
-          test -e /dev/kvm
-          ls -l /dev/kvm
-          id
-
-          sudo usermod -aG kvm "$USER" || true
-          sg kvm -c 'id && ls -l /dev/kvm'
-
-      - name: Prepare VM workspace
-        run: |
-          mkdir -p vm/cache
-
-      - name: Restore cached Ubuntu minimal image
-        id: cache-ubuntu-img
-        uses: actions/cache@v4
-        with:
-          path: vm/cache/${{ env.UBUNTU_MINIMAL_IMG_NAME }}
-          key: ubuntu-minimal-${{ runner.os }}-${{ env.UBUNTU_MINIMAL_IMG_NAME }}
-
-      - name: Download Ubuntu Minimal Cloud Image (only if cache miss)
-        if: steps.cache-ubuntu-img.outputs.cache-hit != 'true'
-        run: |
-          curl -fsSL -o "vm/cache/${UBUNTU_MINIMAL_IMG_NAME}" "${UBUNTU_MINIMAL_IMG_URL}"
-          ls -lh "vm/cache/${UBUNTU_MINIMAL_IMG_NAME}"
-
-      - name: Prepare cloud-init seed + overlay disk
-        run: |
-          cd vm
-
-          ssh-keygen -t ed25519 -N "" -f id_ed25519 <<<y >/dev/null 2>&1
-
-          cat > user-data <<'EOF'
-          #cloud-config
-          users:
-            - name: ubuntu
-              sudo: ["ALL=(ALL) NOPASSWD:ALL"]
-              groups: [sudo]
-              shell: /bin/bash
-              ssh_authorized_keys:
-                - __SSH_PUBKEY__
-          ssh_pwauth: false
-          disable_root: true
-          package_update: false
-          packages: []
-          runcmd:
-            - [ sh, -c, "echo cloud-init-ready > /var/tmp/cloud-init-ready" ]
-          EOF
-
-          PUBKEY="$(cat id_ed25519.pub)"
-          sed -i "s|__SSH_PUBKEY__|${PUBKEY}|g" user-data
-
-          cat > meta-data <<'EOF'
-          instance-id: gh-actions-qemu
-          local-hostname: gh-actions-qemu
-          EOF
-
-          cloud-localds -v seed.iso user-data meta-data
-
-          BASE_IMG="cache/${UBUNTU_MINIMAL_IMG_NAME}"
-          test -f "${BASE_IMG}"
-          qemu-img create -f qcow2 -F qcow2 -b "${BASE_IMG}" ubuntu-minimal.qcow2 20G
-
-      - name: Boot VM with KVM (SSH forwarded to localhost:2222)
-        run: |
-          cd vm
-
-          (ss -ltnp | grep ':2222' && echo "port 2222 already in use" && exit 1) || true
-
-          : > qemu.log
-
-          sg kvm -c 'exec /usr/bin/bash -lc "
-            set -euo pipefail
-
-            nohup qemu-system-x86_64 \
-              -machine accel=kvm \
-              -cpu host \
-              -smp 2 \
-              -m 4096 \
-              -nographic \
-              -drive file=ubuntu-minimal.qcow2,format=qcow2,if=virtio \
-              -drive file=seed.iso,media=cdrom \
-              -netdev user,id=net0,hostfwd=tcp::2222-:22 \
-              -device virtio-net-pci,netdev=net0 \
-              >> qemu.log 2>&1 &
-
-            echo \$! > qemu.pid
-            test -s qemu.pid
-          "'
-
-          sleep 2
-          PID="$(cat qemu.pid)"
-
-          if ! ps -p "$PID" >/dev/null 2>&1; then
-            echo "QEMU exited immediately. Dumping qemu.log:"
-            echo "----------------------------------------"
-            tail -n 200 qemu.log || true
-            echo "----------------------------------------"
-            exit 1
-          fi
-
-          ps -p "$PID" -o pid,cmd
-
-      - name: Wait for SSH to become ready
-        run: |
-          cd vm
-
-          for i in {1..120}; do
-            if nc -z 127.0.0.1 2222; then
-              echo "SSH port is open."
-              break
-            fi
-            sleep 2
-          done
-
-          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5"
-          for i in {1..120}; do
-            if ssh ${SSH_OPTS} -i id_ed25519 -p 2222 ubuntu@127.0.0.1 "test -f /var/tmp/cloud-init-ready"; then
-              echo "cloud-init is ready."
-              break
-            fi
-            sleep 2
-          done
-
-      - name: Build F2FS image inside VM
+      - name: Build F2FS image on runner
         env:
           SRC_IMAGE_NAME: ${{ steps.meta.outputs.src_image_name }}
           OUT_IMAGE_NAME: ${{ steps.meta.outputs.out_image_name }}
           RSYNC_INFO: stats2
         run: |
-          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-
-          ssh ${SSH_OPTS} -i vm/id_ed25519 -p 2222 ubuntu@127.0.0.1 '
-            set -euo pipefail
-            KREL="$(uname -r)"
-            sudo apt-get update
-            sudo apt-get install -y "linux-modules-extra-${KREL}"
-            sudo modprobe f2fs
-            grep -w f2fs /proc/filesystems
-          '
-
-          ssh ${SSH_OPTS} -i vm/id_ed25519 -p 2222 ubuntu@127.0.0.1 "mkdir -p ~/work"
-          scp ${SSH_OPTS} -i vm/id_ed25519 -P 2222 ./rpi-f2fs.bash "ubuntu@127.0.0.1:~/work/rpi-f2fs.bash"
-          scp ${SSH_OPTS} -i vm/id_ed25519 -P 2222 "./${SRC_IMAGE_NAME}" "ubuntu@127.0.0.1:~/work/${SRC_IMAGE_NAME}"
-
-          ssh ${SSH_OPTS} -i vm/id_ed25519 -p 2222 ubuntu@127.0.0.1 \
-            "chmod +x ~/work/rpi-f2fs.bash && sudo RSYNC_INFO=${RSYNC_INFO} bash ~/work/rpi-f2fs.bash ~/work/${SRC_IMAGE_NAME} ~/work/${OUT_IMAGE_NAME}"
-
-          scp ${SSH_OPTS} -i vm/id_ed25519 -P 2222 "ubuntu@127.0.0.1:~/work/${OUT_IMAGE_NAME}" "./${OUT_IMAGE_NAME}"
-
-      - name: Cleanup (stop QEMU)
-        if: always()
-        run: |
-          if [ -f vm/qemu.pid ]; then
-            PID="$(cat vm/qemu.pid || true)"
-            if [ -n "${PID}" ] && ps -p "${PID}" >/dev/null 2>&1; then
-              kill "${PID}" || true
-              sleep 2
-              ps -p "${PID}" >/dev/null 2>&1 && kill -9 "${PID}" || true
-            fi
-          fi
-
-      - name: Upload qemu.log (always)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: qemu-log
-          path: vm/qemu.log
+          set -euo pipefail
+          chmod +x ./rpi-f2fs.bash
+          sudo RSYNC_INFO=${RSYNC_INFO} bash ./rpi-f2fs.bash "./${SRC_IMAGE_NAME}" "./${OUT_IMAGE_NAME}"
 
       - name: Compress output image
         env:
