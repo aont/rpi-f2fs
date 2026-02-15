@@ -121,7 +121,24 @@ jobs:
           OUT_IMAGE_NAME: ${{ steps.meta.outputs.out_image_name }}
         run: |
           set -euo pipefail
-          xz -T0 -z -9e "${OUT_IMAGE_NAME}"
+          MEM_AVAILABLE_KIB="$(awk '/MemAvailable:/ {print $2}' /proc/meminfo)"
+          RESERVE_KIB=$((1024 * 1024)) # Keep 1 GiB for other processes.
+
+          if (( MEM_AVAILABLE_KIB > RESERVE_KIB )); then
+            XZ_MEM_LIMIT_KIB=$((MEM_AVAILABLE_KIB - RESERVE_KIB))
+          else
+            XZ_MEM_LIMIT_KIB=$((MEM_AVAILABLE_KIB * 80 / 100))
+          fi
+
+          # xz requires a meaningful positive memory limit.
+          if (( XZ_MEM_LIMIT_KIB < 262144 )); then
+            XZ_MEM_LIMIT_KIB=262144
+          fi
+
+          echo "MemAvailable: ${MEM_AVAILABLE_KIB} KiB"
+          echo "xz --memlimit-compress: ${XZ_MEM_LIMIT_KIB} KiB"
+
+          xz -T0 --memlimit-compress="${XZ_MEM_LIMIT_KIB}KiB" -z -9e "${OUT_IMAGE_NAME}"
 
       - name: Create release if needed
         env:
